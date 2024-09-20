@@ -1,0 +1,4 @@
+transformers>=4.44.2
+spinesUtils>=0.4.5
+requests>=2.31.0
+IPython>=8.16.1

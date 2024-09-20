@@ -1,0 +1,29 @@
+# Python相关忽略文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 环境配置文件
+.env
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints
+
+# VS Code工作区配置文件
+.vscode/
+
+# 本地配置文件
+*.local
+
+# 日志文件
+*.log
+
+# API密钥文件
+api_key
+
