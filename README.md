@@ -1,6 +1,6 @@
 # Cheaper O1
 
-[demo.png](https://github.com/BirchKwok/cheaper_o1/blob/main/demo.png)
+![demo.png](https://github.com/BirchKwok/cheaper_o1/blob/main/demo.png)
 ## English
 
 ### Introduction
