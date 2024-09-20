@@ -1,12 +1,22 @@
-# ref: https://mp.weixin.qq.com/s/6OGDLnn0VVXOAHV4G2SQww
-
+import re
+import xml.etree.ElementTree as ET
 from openai import OpenAI
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from IPython.display import display, Markdown, HTML
 from webviewer import web_viewer
 from datetime import datetime
 
+
+# 初始化 OpenAI 客户端
+with open("api_key", "r") as f:
+    api_key = f.read().strip()
+
+client = OpenAI(
+    api_key=api_key,
+    base_url="https://open.bigmodel.cn/api/paas/v4/"
+) 
+model = "glm-4-flash"
 
 display(HTML("""
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -23,16 +33,6 @@ function renderMarkdown() {
 </script>
 """))
 
-
-with open("api_key", "r") as f:
-    api_key = f.read().strip()
-
-client = OpenAI(
-    api_key=api_key,
-    base_url="https://open.bigmodel.cn/api/paas/v4/"
-) 
-model = "glm-4-flash"
-
 def get_current_time():
     now = datetime.now()
     return now.strftime("%Y年%m月%d日 %H:%M:%S")
@@ -43,26 +43,17 @@ def get_system_prompt():
 当前时间：{current_time}"""
 
 @dataclass
-class JudgmentResult:
-    is_correct: bool
-    score: float
-    feedback: str
-    use_web_info: bool
-    accuracy_summary: str
-    deficiency_summary: str
-    self_reflection: str  # 新增字段
-
-@dataclass
-class ThoughtStep:
-    step_answer: str
-    is_completed: bool
-    hint: str
-    judgment: Optional[JudgmentResult] = None
+class Step:
+    description: str
+    result: str = ""
 
 @dataclass
 class ReasoningProcess:
     initial_problem: str
-    steps: List[ThoughtStep] = field(default_factory=list)
+    ia_analysis: str = ""
+    steps: List[Step] = field(default_factory=list)
+    final_reasoning: str = ""
+    judgment: str = ""
     final_answer: Optional[str] = None
 
 def bilingual_display(text_en, text_zh):
@@ -82,23 +73,54 @@ def display_collapsible(summary, content, is_markdown=True):
     """
     display(HTML(html))
 
-def solve_problem(problem: str, max_attempts: int = 10) -> ReasoningProcess:
-    bilingual_display("Problem", "问题")
-    display(Markdown(f"{problem}\n"))
-    
-    reasoning_process = ReasoningProcess(initial_problem=problem)
-    attempts = 0
-    is_completed = False
-    min_attempts = 3  # 最少尝试次数
+def split_description(description: str) -> str:
+    description = re.sub(r"步骤\d+：", "", description.strip())
+    description = re.sub(r'步骤\d+： ', '', description.strip())
+    return description
 
-    # 进行一次网络搜索，结果将在整个过程中复用
+
+def solve_problem_advanced(problem: str, max_attempts: int = 5) -> ReasoningProcess:
+    bilingual_display("Problem", "问题")
+    display(Markdown(f"{problem}"))
+    reasoning_process = ReasoningProcess(initial_problem=problem)
     web_info = web_viewer(problem)
 
-    # 步骤1：分问题并制定计划
-    analysis_prompt = f"""
-作为一个擅长解决复杂STEM问题的思考者（Thinker），请使用多步骤推理来解决以下问题。
-首先分析问题，思考可能的解决方法，并规划后续解决步骤。
-请参考提供的网络搜索信息。
+    # IA模型：分析问题和规划任务流程
+    reasoning_process.ia_analysis, steps = initial_analysis(problem, web_info)
+    display_collapsible("Initial Analysis / 初步分析", reasoning_process.ia_analysis)
+
+    for attempt in range(max_attempts):
+        reasoning_process.steps = [Step(description=step) for step in steps]
+
+        # 执行每个步骤的T模型
+        for i, step in enumerate(reasoning_process.steps):
+            step.result = execute_step(problem, step.description, web_info, i+1)
+            display_collapsible(f"Step {i+1} Result (Attempt {attempt+1}) / 步骤 {i+1} 结果 (尝试 {attempt+1}) :  {split_description(step.description)}", step.result)
+
+        # 汇总所有步骤的输出结果的T模型
+        reasoning_process.final_reasoning = summarize_results(problem, reasoning_process.steps)
+        display_collapsible(f"Final Reasoning (Attempt {attempt+1}) / 最终推理 (尝试 {attempt+1})", reasoning_process.final_reasoning)
+
+        # 判断模型：核对推理结果是否正确
+        reasoning_process.judgment = judge_result(problem, reasoning_process.ia_analysis, reasoning_process.steps, reasoning_process.final_reasoning, web_info)
+        display_collapsible(f"Judgment (Attempt {attempt+1}) / 判断 (尝试 {attempt+1})", reasoning_process.judgment)
+
+        if is_result_correct(reasoning_process.judgment):
+            break
+
+    # FA模型：整合答案
+    reasoning_process.final_answer = final_answer_fa(problem, reasoning_process.final_reasoning, reasoning_process.judgment)
+    
+    bilingual_display("Final Answer", "最终答案")
+    display(Markdown(f"{reasoning_process.final_answer}"))
+
+    return reasoning_process
+
+def initial_analysis(problem: str, web_info: str) -> Tuple[str, List[str]]:
+    prompt = f"""
+作为一个擅长解决复杂STEM问题的思考者（Thinker），请分析以下问题，思考可能的解决方法，并规划后续解决步骤。
+请尽量减少步骤数量，每个步骤应简洁明了且不可再拆分。
+不要给出最终答案，只需提供分析和计划。
 
 问题：
 {problem}
@@ -106,252 +128,150 @@ def solve_problem(problem: str, max_attempts: int = 10) -> ReasoningProcess:
 网络搜索信息：
 {web_info}
 
-请用简洁的文字提供你的分析和逐步计划。
-"""
-
-    messages = [
-        {"role": "system", "content": get_system_prompt()},
-        {"role": "user", "content": analysis_prompt}
-    ]
+注意：
+1. 请提供你的分析和逐步计划。你的分析应该紧密围绕问题"{problem}"，并且逐步计划应该详细到每个步骤，但尽量保持步骤数量最少。
+2. 每个步骤应独立且不重复，避免不必要的重复处理。
+3. 请不要给出最终答案，只需提供分析和计划。
+4. 请按照以下XML格式返回结果：
+<analysis>
+    <step>步骤1</step>
+    <step>步骤2</step>
+    <step>步骤3</step>
+</analysis>
+    """
     response = client.chat.completions.create(
         model=model,
-        messages=messages
+        messages=[
+            {"role": "system", "content": get_system_prompt()},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.3  # 设置较低的温度以减少随机性
     ).choices[0].message.content.strip()
 
-    # 显示AI的初步分析
-    display_collapsible("Initial Answer Attempt and Step Breakdown / 初步答案尝试和步骤分解", response)
+    # 解析XML格式的步骤
+    steps = parse_steps_xml(response)
+    return response, steps
 
-    hint = response
-    analysis_step = ThoughtStep(step_answer="", is_completed=False, hint=hint)
-    reasoning_process.steps.append(analysis_step)
+def parse_steps_xml(analysis: str) -> List[str]:
+    try:
+        root = ET.fromstring(analysis)
+        steps = [step.text.strip() for step in root.findall('.//step') if step.text]
+        # 去除可能的重复步骤
+        unique_steps = list(dict.fromkeys(steps))
+        return unique_steps
+    except ET.ParseError as e:
+        print("XML解析错误:", e)
+        # 备用策略：尝试使用正则解析
+        return parse_steps_fallback(analysis)
 
-    messages = [{"role": "system", "content": get_system_prompt()},
-                {"role": "user", "content": f"对这个问题进行思考，并参考以下网络搜索信息：\n\n问题：{problem}\n\n网络搜索信息：{web_info}"},
-                {"role": "assistant", "content": hint},
-                {"role": "user", "content": "根据这个思路和网络搜索信息解决问题，并给出答案。"}]
+def parse_steps_fallback(analysis: str) -> List[str]:
+    # 备用的步骤解析方法
+    steps = re.findall(r'^\d+\.\s*(.+)', analysis, re.MULTILINE)
+    if not steps:
+        steps = re.findall(r'^- \s*(.+)', analysis, re.MULTILINE)
+    # 去除可能的重复步骤
+    unique_steps = list(dict.fromkeys(steps))
+    return unique_steps
 
-    # 继续执行计划并尝试解决问题
-    while (not is_completed and attempts < max_attempts) or attempts < min_attempts:
-        attempts += 1
-        
-        try:
-            # 修改：在生成步骤答案的 prompt 中加入反问元素
-            step_prompt = f"""
-根据这个思路和网络搜索信息解决问题，并给出答案。
+def execute_step(problem: str, step_description: str, web_info: str, step_number: int) -> str:
+    prompt = f"""
+根据以下信息，执行任务流程并完成步骤 {step_number}：
 
-在给出答案后，请仔细思考并回答以下问题：
-1. 这个答案是否完全正确？
-2. 如果不完全正确，哪里需要改进？
+问题：{problem}
 
-请首先给出你的答案，然后回答上述问题。
-"""
-            messages.append({"role": "user", "content": step_prompt})
+步骤描述：{step_description}
 
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages
-            ).choices[0].message.content.strip()
+网络搜索信息：{web_info}
 
-            # 提取步骤答案和自我评估
-            parts = response.split("\n\n", 1)
-            step_answer = parts[0].strip()
-            self_assessment = parts[1].strip() if len(parts) > 1 else ""
+请详细完成上述步骤，并给出相应的结果。
+    """
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": get_system_prompt()},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.3  # 统一设定温度
+    ).choices[0].message.content.strip()
+    return response
 
-            display_collapsible(f"Step Answer (Attempt {attempts}) / 步骤答案（尝试 {attempts}）", step_answer)
-            if self_assessment:
-                display_collapsible(f"Self-Assessment (Attempt {attempts}) / 自我评估（尝试 {attempts}）", self_assessment)
+def summarize_results(problem: str, steps: List[Step]) -> str:
+    combined_results = "\n".join([f"步骤 {i+1} 结果：{step.result}" for i, step in enumerate(steps)])
+    prompt = f"""
+请综合以下步骤的结果，进行最终的推理：
 
-            # 记录步骤答案
-            step = ThoughtStep(step_answer=step_answer, is_completed=False, hint=hint)
-            reasoning_process.steps.append(step)
+问题：{problem}
 
-            messages.append({"role": "assistant", "content": step_answer})
+步骤结果：
+{combined_results}
 
-            # 如果达到最小尝试次数，进行评判
-            if attempts >= min_attempts:
-                # 使用评判者模型
-                previous_steps = [step.step_answer for step in reasoning_process.steps]
-                judgment = judge_step(problem, step_answer, previous_steps, web_info)
-                step.judgment = judgment
-                step.is_completed = judgment.is_correct
+请根据这些信息，给出一个综合的推理结论。
+    """
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": get_system_prompt()},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.3
+    ).choices[0].message.content.strip()
+    return response
 
-                judgment_content = f"""
-是否正确：{'是' if judgment.is_correct else '否'}
-得分：{judgment.score}/100
-反馈：{judgment.feedback}
-准确性总结：{judgment.accuracy_summary}
-缺陷总结：{judgment.deficiency_summary}
-自我反思：{judgment.self_reflection}
-"""
-                display_collapsible(f"Judgment Result (Attempt {attempts}) / 评判结果（尝试 {attempts}）", judgment_content)
+def judge_result(problem: str, ia_analysis: str, steps: List[Step], final_reasoning: str, web_info: str) -> str:
+    combined_steps = "\n".join([f"步骤 {i+1} 描述：{step.description}\n步骤 {i+1} 结果：{step.result}" for i, step in enumerate(steps)])
+    prompt = f"""
+请综合以下信息，判断当前的推理结果是否正确，是否需要进一步迭代：
 
-                if judgment.is_correct and judgment.score >= 90:
-                    is_completed = True
-                    reasoning_process.final_answer = step_answer
-                    break
+原始问题：{problem}
 
-                # 如果评判结果不理想，使用反馈作为新的提示
-                if not is_completed:
-                    hint = judgment.feedback
-                    messages.append({"role": "user", "content": f"根据以下反馈改进你的答案，并继续思考问题的解决方案：{hint}"})
-            else:
-                # 如果还未达到最小尝试次数，继续思考
-                messages.append({"role": "user", "content": "请继续思考并改进你的答案。"})
+初步分析：{ia_analysis}
 
-        except Exception as e:
-            print(f"错误：在尝试 {attempts} 中发生异常：{str(e)}")
-            continue
+步骤及结果：
+{combined_steps}
 
-    # 如果达到最大尝试次数或循环结束后仍未得到答案，再次尝试获取最终答案
-    if not reasoning_process.final_answer:
-        bilingual_display("Max attempts reached or no satisfactory answer found", "达到最大尝试次数或未找到满意答案")
-        
-        # 准备所有步骤的总结
-        all_steps_summary = "\n".join([f"步骤 {i+1}:\n{step.step_answer}\n评判:\n准确性：{step.judgment.accuracy_summary if step.judgment else '无评判'}\n缺陷：{step.judgment.deficiency_summary if step.judgment else '无评判'}" for i, step in enumerate(reasoning_process.steps)])
-        
-        final_prompt = f"""
-基于之前的推理过程总结，请给出你的最终答案。
+最终推理：
+{final_reasoning}
 
-问题：
-{reasoning_process.initial_problem}
-
-推理过程总结：
-{all_steps_summary}
-
-请注意：
-1. 使用与问题相同的语言回答。
-2. 答案尽量简短，避免出现任何与问题"{reasoning_process.initial_problem}"不相关的答案。
-3. 直接说出改进后的答案，而不需要解释，或者强调是改进后的答案。
-
-请现在给出答案：
-"""
-
-        messages.append({"role": "user", "content": final_prompt})
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages
-        ).choices[0].message.content.strip()
-
-        reasoning_process.final_answer = response
-
-    # 显示最终答案
-    bilingual_display("Final Answer", "最终答案")
-    final_answer = reasoning_process.final_answer
-    display(Markdown(f"{final_answer}"))
-
-    return reasoning_process
-
-def judge_step(problem: str, step_answer: str, previous_steps: List[str], web_info: str) -> JudgmentResult:
-    judgment_prompt = f"""
-作为一个专业的评判者（思考者/Thinker），请评估以下问题解决步骤的正确性和质量。请务必参考提供的互联网信息。
-
-问题：
-{problem}
-
-当前步骤答案：
-{step_answer}
-
-之前的步骤：
-{chr(10).join(previous_steps)}
-
-互联网信息：
+网络搜索信息：
 {web_info}
 
-请根据以下标准进行评判：
-1. 逻辑一致性（0-20分）：思维步骤是否符合逻辑，没有矛盾。
-2. 相关性（0-20分）：每一步是否与问题相关，并推进了解决方案。
-3. 准确性（0-20分）：计算、事实或推理是否准确，是否与互联网信息一致。
-4. 完整性（0-20分）：是否涵盖了问题的所有方面。
-5. 创新性（0-10分）：解决方案是否有创新之处。
-6. 可行性（0-10分）：解决方案是否实际可行。
-
-请仔细评估答案，并提供详细的反馈。如果答案完全正确，请给出高分并说明原因。
-
-在给出评判结果后，请反问自己：
-1. 这个评判是否公正合理？
-2. 是否有遗漏或误解的地方？
-
-请按以下格式回答：
-
-是否正确：[是/否]
-得分：[0-100]
-反馈：[详细反馈，包括优点和改进建议]
-准确性总结：[总结当前答案的准确之处]
-缺陷总结：[总结当前答案的主要缺陷]
-自我反思：[回答上述两个反问]
-"""
-
+请给出你的判断，如果认为答案已经正确，请明确说明"结果正确"，并简要总结正确的答案。如果认为还需要进一步迭代，请说明原因。
+    """
     response = client.chat.completions.create(
         model=model,
-        messages=[{"role": "system", "content": get_system_prompt()},
-                  {"role": "user", "content": judgment_prompt}]
+        messages=[
+            {"role": "system", "content": get_system_prompt()},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.3
     ).choices[0].message.content.strip()
+    return response
 
-    # 改进解析逻辑
-    lines = response.split('\n')
-    is_correct = False
-    score = 0
-    feedback = ""
-    accuracy_summary = ""
-    deficiency_summary = ""
-    self_reflection = ""
+def is_result_correct(judgment: str) -> bool:
+    return "结果正确" in judgment
 
-    for line in lines:
-        if line.startswith("是否正确："):
-            is_correct = "是" in line
-        elif line.startswith("得分："):
-            try:
-                score = float(line.split("：")[1].split("/")[0])
-            except (ValueError, IndexError):
-                score = 0
-        elif line.startswith("反馈："):
-            feedback = line.split("：", 1)[1].strip()
-        elif line.startswith("准确性总结："):
-            accuracy_summary = line.split("：", 1)[1].strip()
-        elif line.startswith("缺陷总结："):
-            deficiency_summary = line.split("：", 1)[1].strip()
-        elif line.startswith("自我反思："):
-            self_reflection = line.split("：", 1)[1].strip()
-        else:
-            # 将其他行添加到反馈中
-            feedback += " " + line.strip()
+def final_answer_fa(problem: str, final_reasoning: str, judgment: str) -> str:
+    prompt = f"""
+请根据以下信息，整合出一个简洁的最终答案：
 
-    # 清理反馈中的方括号
-    feedback = feedback.replace("[", "").replace("]", "").strip()
+原始问题：{problem}
 
-    # 改进错误处理逻辑
-    if not feedback:
-        feedback = "评判者未提供具体反馈。请检查答案的准确性和完整性。"
-    if score == 0 and is_correct:
-        score = 100  # 如果答案正确但没有给出分数，默认给满分
-    elif score == 0 and not is_correct:
-        score = 50  # 如果答案不正确且没有给出分数，默认给50分
+最终推理：{final_reasoning}
 
-    return JudgmentResult(
-        is_correct=is_correct,
-        score=score,
-        feedback=feedback,
-        use_web_info=True,
-        accuracy_summary=accuracy_summary,
-        deficiency_summary=deficiency_summary,
-        self_reflection=self_reflection
-    )
+判断结果：{judgment}
 
-def display_reasoning_process(process: ReasoningProcess) -> None:
+请给出一个简洁的最终答案，确保答案与原始问题直接相关。
     """
-    显示推理过程的详细信息。
-    """
-    bilingual_display("Problem:", "问题：")
-    display(Markdown(f"{process.initial_problem}\n"))
-    for idx, step in enumerate(process.steps, 1):
-        bilingual_display(f"Step {idx}:", f"步骤 {idx}：")
-        display(Markdown(f"**提示**：{step.hint}\n**是否完成**：{step.is_completed}\n"))
-        if step.judgment:
-            bilingual_display("Judgment Result:", "评判结：")
-            display(Markdown(f"得分：{step.judgment.score}/100\n反馈：{step.judgment.feedback}\n使用网络信息：{'是' if step.judgment.use_web_info else '否'}\n"))
-    if process.final_answer:
-        bilingual_display("Final Answer:", "最终答案：")
-        display(Markdown(f"{process.final_answer}"))
-    else:
-        bilingual_display("Final Answer:", "最终答案：")
-        display(Markdown("尚未确定。"))
+    response = client.chat.completions.create(
+        model=model,
+        messages=[
+            {"role": "system", "content": get_system_prompt()},
+            {"role": "user", "content": prompt}
+        ],
+        temperature=0.3
+    ).choices[0].message.content.strip()
+    return response
+
+# 示例调用
+# problem = "请解释量子纠缠现象。"
+# solve_problem_advanced(problem)
