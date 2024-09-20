@@ -1,5 +1,6 @@
 # Cheaper O1
 
+[demo.png]()
 ## English
 
 ### Introduction
@@ -9,7 +10,6 @@ Cheaper O1 is a simple Chain-of-Thought (COT) model product designed as an alter
 - Implements a multi-step reasoning process
 - Utilizes web search for information gathering
 - Provides self-assessment and judgment of answers
-- Supports bilingual output (English and Chinese)
 
 ### Usage
 1. Install the required dependencies:
@@ -52,7 +52,6 @@ Cheaper O1 是一个简单的思维链（Chain-of-Thought，COT）模型产品�
 - 实现多步推理过程
 - 利用网络搜索收集信息
 - 提供答案的自我评估和判断
-- 支持双语输出（英文和中文）
 
 ### 使用方法
 1. 安装所需依赖：
