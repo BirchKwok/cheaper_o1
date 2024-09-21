@@ -180,6 +180,11 @@ class ProblemSolver:
 网络搜索信息：{web_info}
 
 请结合网络搜索信息（如果不需要网络搜索信息就可以解决，请忽略），详细完成上述步骤，并给出相应的结果。
+
+
+注意:
+1. 只能完成步骤内容和步骤指导中的要求，不可以尝试在这一个步骤中直接解答问题
+2. 反思总结，如果当前步骤没有完成，请说明原因，并提出改进措施。如果当前步骤已经完成，请给出详细结果。
         """
         response = client.chat.completions.create(
             model=model,
@@ -202,6 +207,11 @@ class ProblemSolver:
 {combined_results}
 
 请根据这些信息，给出一个综合的推理结论。
+
+
+注意：
+1. 答案只能从给定的信息中推理得出，不可以使用网络搜索信息
+2. 答案必须简洁明了，不可以有多余的描述
         """
         response = client.chat.completions.create(
             model=model,
@@ -255,6 +265,10 @@ class ProblemSolver:
 最终推理：{final_reasoning}
 
 判断结果：{judgment}
+
+注意：
+1. 答案只能从给定的信息中推理得出，不可以使用网络搜索信息
+2. 答案必须简洁明了，不可以有多余的描述
 
 请给出一个简洁的最终答案，确保答案与原始问题直接相关。
         """
