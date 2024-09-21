@@ -15,7 +15,7 @@ with open("api_key", "r") as f:
 client = OpenAI(
     api_key=api_key,
     base_url="https://open.bigmodel.cn/api/paas/v4/"
-) 
+)
 model = "glm-4-flash"
 
 
@@ -72,7 +72,7 @@ class ProblemSolver:
         for attempt_number in range(1, max_attempts + 1):
             steps = [Step(content=step.content, description=step.description) for step in initial_steps]
             yield f"正在进行第 {attempt_number} 次尝试"
-            
+
             for i, step in enumerate(steps):
                 yield f"正在进行第 {attempt_number} 次尝试 (步骤 {i+1}/{len(steps)})"
                 step.result = self.execute_step(problem, step, web_info, i+1)
@@ -133,7 +133,7 @@ class ProblemSolver:
             {"role": "system", "content": get_system_prompt()},
             {"role": "user", "content": prompt}
         ]
-        
+
         if history and isinstance(history, str):
             messages.insert(1, {"role": "assistant", "content": history})
 

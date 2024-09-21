@@ -15,7 +15,7 @@ with open("api_key", "r") as f:
 client = OpenAI(
     api_key=api_key,
     base_url="https://open.bigmodel.cn/api/paas/v4/"
-) 
+)
 model = "glm-4-flash"
 
 display(HTML("""
@@ -117,7 +117,7 @@ class ProblemSolver:
 
         # FA模型：整合答案
         reasoning_process.final_answer = self.final_answer_fa(problem, reasoning_process.final_reasoning, reasoning_process.judgment)
-        
+
         bilingual_display("Final Answer", "最终答案")
         display(Markdown(f"{reasoning_process.final_answer}"))
 
@@ -164,7 +164,7 @@ class ProblemSolver:
             {"role": "system", "content": get_system_prompt()},
             {"role": "user", "content": prompt}
         ]
-        
+
         if history:
             messages.insert(1, {"role": "assistant", "content": history})
 
