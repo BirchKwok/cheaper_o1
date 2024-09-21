@@ -27,3 +27,4 @@ venv.bak/
 # API密钥文件
 api_key
 
+.DS_Store
