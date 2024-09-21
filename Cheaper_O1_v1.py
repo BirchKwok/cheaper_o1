@@ -79,7 +79,7 @@ def split_description(description: str) -> str:
     return description
 
 
-def solve_problem_advanced(problem: str, max_attempts: int = 5) -> ReasoningProcess:
+def solve_problem(problem: str, max_attempts: int = 5) -> ReasoningProcess:
     bilingual_display("Problem", "问题")
     display(Markdown(f"{problem}"))
     reasoning_process = ReasoningProcess(initial_problem=problem)
@@ -271,7 +271,3 @@ def final_answer_fa(problem: str, final_reasoning: str, judgment: str) -> str:
         temperature=0.3
     ).choices[0].message.content.strip()
     return response
-
-# 示例调用
-# problem = "请解释量子纠缠现象。"
-# solve_problem_advanced(problem)

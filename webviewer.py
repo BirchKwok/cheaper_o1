@@ -25,6 +25,9 @@ def web_viewer(search_str: str, return_type: str = "text"):
     Returns:
         (str | dict): 搜索结果
     """
+    if not search_str:
+        return ""
+    
     msg = [
         {
             "role": "user",
@@ -48,4 +51,36 @@ def web_viewer(search_str: str, return_type: str = "text"):
         timeout=300
     )
     
-    return resp.content.decode() if return_type == "text" else resp.json()
+    try:
+        resp = resp.json()
+    except Exception as e:
+        return resp.text
+
+    try:
+        resp = resp['choices'][0]['message']['tool_calls']
+    except KeyError:
+        return step_by_step_get_web_info(resp, "choices", "0", "message", "tool_calls")
+    except Exception as e:
+        return resp.text
+    
+    return str(resp) if return_type == "text" else resp
+
+
+def step_by_step_get_web_info(resp: dict, *keys: str):
+    """
+    逐步获取网页信息
+    """
+    keys_link = []
+    for key in keys:
+        new_resp = resp.get(key, None)
+        if new_resp is None:
+            break
+        keys_link.append(new_resp)
+    
+    if len(keys_link) == 0:
+        return str(resp)
+    
+    # 逐步获取网页信息
+    for key in keys_link:
+        resp = resp[key]
+    return str(resp)
