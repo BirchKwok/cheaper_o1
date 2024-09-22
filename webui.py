@@ -170,13 +170,14 @@ class ProblemSolver:
     def __init__(self):
         self.last_fa_output = None
         self.prompt_optimizer = PromptOptimizer()
+        self.reasoning_process = None  # 初始化为 None
 
     def solve_problem_with_history(self, problem: str, messages: List[Dict[str, str]], max_attempts: int = 5):
-        reasoning_process = ReasoningProcess(initial_problem=problem)
+        self.reasoning_process = ReasoningProcess(initial_problem=problem)  # 在这里初始化 reasoning_process
         web_info = web_viewer(problem)
 
         chosen_prompt, prompt_explanation = self.prompt_optimizer.choose_prompt(problem, messages)
-        reasoning_process.prompt_selection = prompt_explanation
+        self.reasoning_process.prompt_selection = prompt_explanation
 
         # 获取用户的上一个问题（如果存在）
         previous_question = None
@@ -186,7 +187,7 @@ class ProblemSolver:
                 break
 
         yield "思考中...\n正在进行初步分析"
-        reasoning_process.ia_analysis, initial_steps = self.initial_analysis(problem, web_info, messages, chosen_prompt, previous_question)
+        self.reasoning_process.ia_analysis, initial_steps = self.initial_analysis(problem, web_info, messages, chosen_prompt, previous_question)
         yield "初步分析完成。\n开始尝试解决问题..."
 
         for attempt_number in range(1, max_attempts + 1):
@@ -201,22 +202,177 @@ class ProblemSolver:
             final_reasoning = self.summarize_results(problem, steps)
 
             yield f"正在判断第 {attempt_number} 次尝试的结果"
-            judgment = self.judge_result(problem, reasoning_process.ia_analysis, steps, final_reasoning, web_info, chosen_prompt)
+            judgment = self.judge_result(problem, self.reasoning_process.ia_analysis, steps, final_reasoning, web_info, chosen_prompt)
 
             attempt = Attempt(number=attempt_number, steps=steps, final_reasoning=final_reasoning, judgment=judgment)
-            reasoning_process.attempts.append(attempt)
+            self.reasoning_process.attempts.append(attempt)
 
             if self.is_result_correct(judgment):
                 yield "正在生成最终回答"
                 break
 
-        reasoning_process.final_answer = self.final_answer_fa(problem, reasoning_process.attempts[-1].final_reasoning, reasoning_process.attempts[-1].judgment)
-        self.last_fa_output = reasoning_process.final_answer
+        self.reasoning_process.final_answer = self.final_answer_fa(problem, self.reasoning_process.attempts[-1].final_reasoning, self.reasoning_process.attempts[-1].judgment)
+        self.last_fa_output = self.reasoning_process.final_answer
 
-        reward = self.calculate_reward(reasoning_process)
+        reward = self.calculate_reward(self.reasoning_process)
         self.prompt_optimizer.update(chosen_prompt, reward)
 
-        yield reasoning_process
+        yield self.reasoning_process
+
+    def execute_step(self, problem: str, step: Step, web_info: str, step_number: int, previous_steps: List[Step], messages: List[Dict[str, str]], previous_question: Optional[str]) -> str:
+        previous_steps_info = "\n".join([f"步骤 {i+1}：\n内容：{s.content}\n结果：{s.result}" for i, s in enumerate(previous_steps)])
+
+        previous_attempts_info = ""
+        for i, attempt in enumerate(self.reasoning_process.attempts):
+            previous_attempts_info += f"\n尝试 {i+1}：\n"
+            previous_attempts_info += "\n".join([f"步骤 {j+1}：\n内容：{s.content}\n结果：{s.result}" for j, s in enumerate(attempt.steps)])
+            previous_attempts_info += f"\n最终推理：{attempt.final_reasoning}\n判断：{attempt.judgment}\n"
+
+        prompt = f"""
+根据以下信息，执行任务流程并完成步骤 {step_number}：
+
+当前问题：{problem}
+
+上一个问题：{previous_question if previous_question else "无"}
+
+步骤内容：{step.content}
+
+步骤指导：{step.description}
+
+网络搜索信息：{web_info}
+
+之前的步骤：
+{previous_steps_info}
+
+之前的尝试：
+{previous_attempts_info}
+
+请执行以下任务：
+1. 回顾之前所有步骤和尝试的推理结果。
+2. 考虑上一个问题（如果有）与当前问题的关系。
+3. 分析之前的尝试为什么失败，指出关键问题和错误。
+4. 基于之前尝试的失败经验，提出改进建议。
+5. 质疑和验证之前步骤的正确性。如果发现任何错误或不一致，请指出并解释。
+6. 如果需要，对之前的步骤进行修正。
+7. 结合以上信息，详细完成当前步骤，并给出相应的结果。
+
+请以下面的格式提供你的回答：
+
+回顾与验证：
+[在这里提供对之前步骤和尝试的回顾、质疑和验证]
+
+失败分析：
+[分析之前尝试失败的原因]
+
+改进建议：
+[基于失败分析提出的改进建议]
+
+修正（如果需要）：
+[如果需要修正之前的步骤，请在这里说明]
+
+当前步骤执行：
+[在这里详细说明当前步骤的执行过程和结果]
+        """
+        step_messages = messages + [{"role": "user", "content": prompt}]
+
+        response = client.chat.completions.create(
+            model=model,
+            messages=step_messages,
+            temperature=0.7
+        ).choices[0].message.content.strip()
+        return response
+
+    def summarize_results(self, problem: str, steps: List[Step]) -> str:
+        combined_results = "\n".join([f"步骤 {i+1} 结果：{step.result}" for i, step in enumerate(steps)])
+        prompt = f"""
+请综合以下步骤的结果，进行最终的推理：
+
+问题：{problem}
+
+步骤结果：
+{combined_results}
+
+请根据这些信息，给出一个综合的推理结论。
+
+注意：
+1. 请确保推理过程合理，步骤清晰，结论有充分的依据支持。
+2. 请仔细检查推理过程中是否有任何明显的错误或遗漏。
+3. 请确保答案与原始问题直接相关。
+        """
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": get_system_prompt()},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
+        ).choices[0].message.content.strip()
+        return response
+
+    def judge_result(self, problem: str, ia_analysis: str, steps: List[Step], final_reasoning: str, web_info: str, chosen_prompt: str) -> str:
+        combined_steps = "\n".join([f"步骤 {i+1} 描述：{step.description}\n步骤 {i+1} 结果：{step.result}" for i, step in enumerate(steps)])
+        prompt = f"""
+请综合以下信息，判断当前的推理结果是否正确，是否需要进一步迭代：
+
+原始问题：{problem}
+
+选择的初始 prompt：{chosen_prompt}
+
+初步分析：{ia_analysis}
+
+步骤及结果：
+{combined_steps}
+
+最终推理：
+{final_reasoning}
+
+网络搜索信息：
+{web_info}
+
+请给出你的判断，考虑以下几点：
+1. 解决方案是否直接回答了原始问题？
+2. 解决过程是否符合初始 prompt 的要求和方向？
+3. 推理过程是否合理，步骤是否清晰？
+4. 最终结论是否有充分的依据支持？
+5. 是否有任何明显的错误或遗漏？
+
+如果认为答案已经正确且完整，请明确说明"结果正确"，并简要总结正确的答案。
+如果认为还需要进一步迭代，请详细说明原因和改进建议。
+        """
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": get_system_prompt()},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
+        ).choices[0].message.content.strip()
+        return response
+
+    def is_result_correct(self, judgment: str) -> bool:
+        return "结果正确" in judgment
+
+    def final_answer_fa(self, problem: str, final_reasoning: str, judgment: str) -> str:
+        prompt = f"""
+请根据以下信息，整合出一个简洁的最终答案：
+
+原始问题：{problem}
+
+最终推理：{final_reasoning}
+
+判断结果：{judgment}
+
+请给出一个简洁的最终答案，确保答案与原始问题直接相关。
+        """
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": get_system_prompt()},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7
+        ).choices[0].message.content.strip()
+        return response
 
     def calculate_reward(self, reasoning_process):
         if self.is_result_correct(reasoning_process.attempts[-1].judgment):
@@ -372,144 +528,6 @@ class ProblemSolver:
             steps = [Step(content=step.strip(), description="") for step in old_steps]
 
         return steps
-
-    def execute_step(self, problem: str, step: Step, web_info: str, step_number: int, previous_steps: List[Step], messages: List[Dict[str, str]], previous_question: Optional[str]) -> str:
-        previous_steps_info = "\n".join([f"步骤 {i+1}：\n内容：{s.content}\n结果：{s.result}" for i, s in enumerate(previous_steps)])
-
-        prompt = f"""
-根据以下信息，执行任务流程并完成步骤 {step_number}：
-
-当前问题：{problem}
-
-上一个问题：{previous_question if previous_question else "无"}
-
-步骤内容：{step.content}
-
-步骤指导：{step.description}
-
-网络搜索信息：{web_info}
-
-之前的步骤：
-{previous_steps_info}
-
-请执行以下任务：
-1. 回顾之前所有步骤的推理结果。
-2. 考虑上一个问题（如果有）与当前问题的关系。
-3. 质疑和验证之前步骤的正确性。如果发现任何错误或不一致，请指出并解释。
-4. 如果需要，对之前的步骤进行修正。
-5. 结合以上信息，详细完成当前步骤，并给出相应的结果。
-
-请以下面的格式提供你的回答：
-
-回顾与验证：
-[在这里提供对之前步骤的回顾、质疑和验证]
-
-修正（如果需要）：
-[如果需要修正之前的步骤，请在这里说明]
-
-当前步骤执行：
-[在这里详细说明当前步骤的执行过程和结果]
-        """
-        step_messages = messages + [{"role": "user", "content": prompt}]
-
-        response = client.chat.completions.create(
-            model=model,
-            messages=step_messages,
-            temperature=0.7
-        ).choices[0].message.content.strip()
-        return response
-
-    def summarize_results(self, problem: str, steps: List[Step]) -> str:
-        combined_results = "\n".join([f"步骤 {i+1} 结果：{step.result}" for i, step in enumerate(steps)])
-        prompt = f"""
-请综合以下步骤的结果，进行最终的推理：
-
-问题：{problem}
-
-步骤结果：
-{combined_results}
-
-请根据这些信息，给出一个综合的推理结论。
-
-注意：
-1. 请确保推理过程合理，步骤清晰，结论有充分的依据支持。
-2. 请仔细检查推理过程中是否有任何明显的错误或遗漏。
-3. 请确保答案与原始问题直接相关。
-        """
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": get_system_prompt()},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7
-        ).choices[0].message.content.strip()
-        return response
-
-    def judge_result(self, problem: str, ia_analysis: str, steps: List[Step], final_reasoning: str, web_info: str, chosen_prompt: str) -> str:
-        combined_steps = "\n".join([f"步骤 {i+1} 描述：{step.description}\n步骤 {i+1} 结果：{step.result}" for i, step in enumerate(steps)])
-        prompt = f"""
-请综合以下信息，判断当前的推理结果是否正确，是否需要进一步迭代：
-
-原始问题：{problem}
-
-选择的初始 prompt：{chosen_prompt}
-
-初步分析：{ia_analysis}
-
-步骤及结果：
-{combined_steps}
-
-最终推理：
-{final_reasoning}
-
-网络搜索信息：
-{web_info}
-
-请给出你的判断，考虑以下几点：
-1. 解决方案是否直接回答了原始问题？
-2. 解决过程是否符合初始 prompt 的要求和方向？
-3. 推理过程是否合理，步骤是否清晰？
-4. 最终结论是否有充分的依据支持？
-5. 是否有任何明显的错误或遗漏？
-
-如果认为答案已经正确且完整，请明确说明"结果正确"，并简要总结正确的答案。
-如果认为还需要进一步迭代，请详细说明原因和改进建议。
-        """
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": get_system_prompt()},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7
-        ).choices[0].message.content.strip()
-        return response
-
-    def is_result_correct(self, judgment: str) -> bool:
-        return "结果正确" in judgment
-
-    def final_answer_fa(self, problem: str, final_reasoning: str, judgment: str) -> str:
-        prompt = f"""
-请根据以下信息，整合出一个简洁的最终答案：
-
-原始问题：{problem}
-
-最终推理：{final_reasoning}
-
-判断结果：{judgment}
-
-请给出一个简洁的最终答案，确保答案与原始问题直接相关。
-        """
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": get_system_prompt()},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7
-        ).choices[0].message.content.strip()
-        return response
 
 solver = ProblemSolver()
 
