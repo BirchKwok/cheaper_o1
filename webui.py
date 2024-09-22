@@ -6,11 +6,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Dict
 from webviewer import web_viewer
 from datetime import datetime
-import numpy as np
-import gensim.downloader as api
 
-# 下载预训练的Word2Vec模型
-word2vec_model = api.load("word2vec-google-news-300")
 
 # 初始化 OpenAI 客户端
 with open("api_key", "r") as f:
@@ -63,17 +59,6 @@ class PromptTemplate:
         self.performance_score = 1.0
         self.use_count = 0
 
-def text_to_vec(text):
-    words = text.lower().split()
-    vec = np.zeros(word2vec_model.vector_size)
-    count = 0
-    for word in words:
-        if word in word2vec_model:
-            vec += word2vec_model[word]
-            count += 1
-    if count > 0:
-        vec /= count
-    return vec
 
 class PromptOptimizer:
     def __init__(self):
@@ -156,8 +141,6 @@ class PromptOptimizer:
                 template.performance_score = (template.performance_score * template.use_count + reward) / (template.use_count + 1)
                 break
 
-        self.problem_vectors.append(text_to_vec(prompt))
-        self.problem_templates.append(prompt)
 
     def analyze_problem(self, problem):
         problem_lower = problem.lower()
@@ -282,7 +265,7 @@ class ProblemSolver:
 3. 每个步骤应独立且不重复，避免不必要的重复处理。
 4. 请不要给出最终答案，只需提供分析和计划。
 5. 如果不需要网络搜索信息，请忽略。
-6. 请严格按照以下XML格式返回结果：
+6. 请严格按照以下XML格式返回结果，确保XML格式正确无误，否则会导致解析失败：
 
 <analysis>
     <step>
@@ -298,6 +281,8 @@ class ProblemSolver:
         <description>对执行这个步骤的模型的简短指导</description>
     </step>
 </analysis>
+
+请确保你的回答只包含上述XML格式的内容，不要添加任何其他文本。
         """
 
         analysis_messages = messages + [{"role": "user", "content": prompt}]
@@ -312,6 +297,10 @@ class ProblemSolver:
         return response, steps
 
     def parse_steps_xml(self, analysis: str) -> List[Step]:
+        xml_content = re.search(r'<analysis>.*</analysis>', analysis, re.DOTALL)
+        if xml_content:
+            analysis = xml_content.group(0)
+
         try:
             root = ET.fromstring(analysis)
             steps = []
