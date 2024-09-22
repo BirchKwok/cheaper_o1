@@ -4,3 +4,4 @@ requests>=2.31.0
 IPython>=8.16.1
 gradio>=3.50.2
 openai>=0.27.8
+gensim==4.3.3
