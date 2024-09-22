@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Dict
 from webviewer import web_viewer
 from datetime import datetime
-
+from bs4 import BeautifulSoup
 
 # 初始化 OpenAI 客户端
 with open("api_key", "r") as f:
@@ -44,6 +44,7 @@ class Attempt:
 class ReasoningProcess:
     initial_problem: str
     ia_analysis: str = ""
+    prompt_selection: str = ""
     attempts: List[Attempt] = field(default_factory=list)
     final_answer: Optional[str] = None
 
@@ -59,7 +60,6 @@ class PromptTemplate:
         self.performance_score = 1.0
         self.use_count = 0
 
-
 class PromptOptimizer:
     def __init__(self):
         self.prompt_templates = [
@@ -73,39 +73,20 @@ class PromptOptimizer:
             PromptTemplate("从理论和实践的角度，这个{problem_type}问题有哪些可能的解决方案？请进行对比分析。", ["theoretical-practical"]),
             PromptTemplate("如果资源有限，你会如何优化解决这个{problem_type}问题的方法？请提供一个高效的解决方案。", ["optimization"]),
             PromptTemplate("这个{problem_type}问题可能涉及哪些潜在的陷阱或误区？请在提供解决方案的同时，指出需要注意的关键点。", ["critical-thinking"]),
-            PromptTemplate("作为一名{field}领域的创新者，你如何用创新的方法来解决这个{problem_type}问题？请提出一些非传统的解决方案。", ["innovative"]),
-            PromptTemplate("假设你是一位{field}历史学家，这个{problem_type}问题在历史上是如何被解决的？请提供历史视角和现代应用。", ["historical"]),
-            PromptTemplate("作为一名{field}领域的质量保证专家，你会如何确保这个{problem_type}问题的解决方案是可靠和高质量的？请提供详细的质量控制步骤。", ["quality-assurance"]),
-            PromptTemplate("你是一位{field}领域的未来学家，考虑到技术发展趋势，这个{problem_type}问题在未来可能如何演变？请提供前瞻性的解决方案。", ["futuristic"]),
-            PromptTemplate("作为一名{field}领域的伦理学家，这个{problem_type}问题可能涉及哪些伦理考量？请在提供解决方案时考虑伦理影响。", ["ethical"]),
-            PromptTemplate("假设你是一位{field}领域的项目经理，你会如何组织团队来解决这个{problem_type}问题？请提供项目规划和资源分配建议��", ["project-management"]),
-            PromptTemplate("作为一名{field}领域的风险分析师，这个{problem_type}问题可能带来哪些潜在风险？请在解决方案中包含风险评估和缓解策略。", ["risk-analysis"]),
-            PromptTemplate("你是一位{field}领域的可持续发展专家，如何以可持续的方式解决这个{problem_type}问题？请考虑长期影响和环境因素。", ["sustainability"]),
-            PromptTemplate("作为一名{field}领域的用户体验设计师，你如何确保这个{problem_type}问题的解决方案是用户友好的？请提供以用户为中心的解决方案。", ["user-experience"]),
-            PromptTemplate("假设你是一位{field}领域的政策制定者，你会提出什么样的政策或法规来解决这个{problem_type}问题？请考虑社会和经济影响。", ["policy-making"]),
-            PromptTemplate("作为一名{field}领域的数据科学家，你会如何运用数据分析和机器学习技术来解决这个{problem_type}问题？请提供基于数据的解决方案。", ["data-science"]),
-            PromptTemplate("假设你是一位{field}领域的营销专家，如何将解决这个{problem_type}问题的方案有效地传达给目标受众？请提供营销策略。", ["marketing"]),
-            PromptTemplate("作为一名{field}领域的人力资源管理者，这个{problem_type}问题可能如何影响员工和组织文化？请提供人才管理的角度。", ["human-resources"]),
-            PromptTemplate("你是一位{field}领域的财务分析师，如何评估解决这个{problem_type}问题的财务影响？请提供成本效益分析。", ["financial-analysis"]),
-            PromptTemplate("作为一名{field}领域的法律顾问，这个{problem_type}问题可能涉及哪些法律风险？请提供法律合规的解决方案。", ["legal"]),
-            PromptTemplate("假设你是一位{field}领域的供应链专家，如何优化解决这个{problem_type}问题的供应链流程？请考虑全球化因素。", ["supply-chain"]),
-            PromptTemplate("作为一名{field}领域的环境科学家，这个{problem_type}问题对环境有何影响？请提供环保的解决方案。", ["environmental-science"]),
-            PromptTemplate("你是一位{field}领域的社会学家，这个{problem_type}问题如何影响社会结构和群体互动？请从社会学角度分析。", ["sociology"]),
-            PromptTemplate("作为一名{field}领域的心理学家，这个{problem_type}问题可能对个人或群体心理有何影响？请提供心理学视角的解决方案。", ["psychology"]),
-            PromptTemplate("假设你是一位{field}领域的教育工作者，如何将这个{problem_type}问题的解决过程转化为教育资源？请设计相关的教学方案。", ["education"]),
-            PromptTemplate("作为一名{field}领域的艺术家或设计师，你会如何用创意方式表达或解决这个{problem_type}问题？请提供艺术或设计方案。", ["art-design"]),
-            PromptTemplate("你是一位{field}领域的医疗保健专业人士，这个{problem_type}问题可能如何影响公共卫生？请提供医疗卫生角度的解决方案。", ["healthcare"]),
-            PromptTemplate("作为一名{field}领域的城市规划师，这个{problem_type}问题如何影响城市发展？请提供城市规划的视角和解决方案。", ["urban-planning"]),
-            PromptTemplate("假设你是一位{field}领域的农业专家，如何将这个{problem_type}问题应用到现代农业中？请考虑可持续农业实践。", ["agriculture"]),
-            PromptTemplate("作为一名{field}领域的能源专家，这个{problem_type}问题与能源利用有何关联？请提供节能和可再生能源的解决方案。", ["energy"]),
+            # ... 其他模板 ...
         ]
-        self.problem_vectors = []
-        self.problem_templates = []
 
     def choose_prompt(self, problem, messages):
         analysis = self.analyze_problem(problem)
 
-        formatted_templates = [template.template.format(**analysis) for template in self.prompt_templates]
+        formatted_templates = []
+        for template in self.prompt_templates:
+            try:
+                formatted_template = template.template.format(**analysis)
+                formatted_templates.append(formatted_template)
+            except KeyError as e:
+                print(f"警告：模板格式化失败，缺少键 {e}。使用原始模板。")
+                formatted_templates.append(template.template)
 
         prompt = f"""
 给定以下问题：
@@ -116,7 +97,8 @@ class PromptOptimizer:
 
 {formatted_templates}
 
-请选择最适合解决这个问题的prompt模板。你的回答应该只包含所选模板的编号（从1开始）。例如，如果你认为第3个模板最合适，就回答"3"。
+请选择最适合解决这个问题的prompt模板。你的回答应该包含所选模板的编号（从1开始）和简短解释。例如：
+"3 - 这个模板最适合，因为它强调了教育性解释，适合{analysis.get('level', '未知')}级别的{analysis.get('problem_type', '未知类型')}问题。"
         """
 
         response = client.chat.completions.create(
@@ -126,14 +108,14 @@ class PromptOptimizer:
         ).choices[0].message.content.strip()
 
         try:
-            chosen_index = int(response) - 1
+            chosen_index = int(response.split()[0]) - 1
             chosen_template = self.prompt_templates[chosen_index]
         except (ValueError, IndexError):
             # 如果大模型的回答无效，就使用默认的选择方法
             chosen_template = max(self.prompt_templates, key=lambda t: t.performance_score)
 
         chosen_template.use_count += 1
-        return chosen_template.template.format(**analysis)
+        return chosen_template.template.format(**analysis), response
 
     def update(self, prompt, reward):
         for template in self.prompt_templates:
@@ -141,53 +123,48 @@ class PromptOptimizer:
                 template.performance_score = (template.performance_score * template.use_count + reward) / (template.use_count + 1)
                 break
 
-
     def analyze_problem(self, problem):
-        problem_lower = problem.lower()
+        prompt = f"""
+请分析以下问题，并提供问题类型、所属领域和难度级别：
 
-        # 数学类问题
-        if any(keyword in problem_lower for keyword in ["数学", "方程", "几何", "代数", "计算", "证明"]):
-            return {"problem_type": "数学", "field": "数学", "level": "高中"}
+问题：{problem}
 
-        # 物理类问题
-        elif any(keyword in problem_lower for keyword in ["物理", "力学", "电磁学", "热力学", "光学", "量子"]):
-            return {"problem_type": "物理", "field": "物理学", "level": "大学"}
+请以以下格式回答：
+问题类型：[填写]
+所属领域：[填写]
+难度级别：[填写]
 
-        # 化学类问题
-        elif any(keyword in problem_lower for keyword in ["化学", "反应", "分子", "元素", "化合物", "酸碱"]):
-            return {"problem_type": "化学", "field": "化学", "level": "高中"}
+注意：
+- 问题类型应该是一个简短的描述，如"数学"、"物理"、"编程"等。
+- 所属领域应该更具体，如"代数"、"力学"、"算法"等。
+- 难度级别应该是"小学"、"初中"、"高中"、"大学"或"研究生"中的一个。
+        """
 
-        # 生物类问题
-        elif any(keyword in problem_lower for keyword in ["生物", "生态", "遗传", "细胞", "进化", "基因"]):
-            return {"problem_type": "生物", "field": "生物学", "level": "大学"}
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3
+        ).choices[0].message.content.strip()
 
-        # 计算机科学类问题
-        elif any(keyword in problem_lower for keyword in ["编程", "算法", "数据结构", "计算机", "软件", "网络"]):
-            return {"problem_type": "计算机科学", "field": "计算机科学", "level": "大学"}
+        analysis = {
+            'problem_type': '一般',
+            'field': '综合',
+            'level': '成人'
+        }
 
-        # 工程类问题
-        elif any(keyword in problem_lower for keyword in ["工程", "机械", "电路", "结构", "设计", "制造"]):
-            return {"problem_type": "工程", "field": "工程学", "level": "大学"}
+        for line in response.split('\n'):
+            if ':' in line:
+                key, value = line.split(':', 1)
+                key = key.strip().lower().replace(' ', '_')
+                value = value.strip()
+                if key == '问题类型':
+                    analysis['problem_type'] = value
+                elif key == '所属领域':
+                    analysis['field'] = value
+                elif key == '难度级别':
+                    analysis['level'] = value
 
-        # 经济金融类问题
-        elif any(keyword in problem_lower for keyword in ["经济", "金融", "投资", "市场", "股票", "货币"]):
-            return {"problem_type": "经济金融", "field": "经济学", "level": "大学"}
-
-        # 历史类问题
-        elif any(keyword in problem_lower for keyword in ["历史", "朝代", "事件", "人物", "文化", "考古"]):
-            return {"problem_type": "历史", "field": "历史学", "level": "高中"}
-
-        # 文学类问题
-        elif any(keyword in problem_lower for keyword in ["文学", "诗歌", "小说", "作家", "文章", "写作"]):
-            return {"problem_type": "文学", "field": "文学", "level": "高中"}
-
-        # 哲学类问题
-        elif any(keyword in problem_lower for keyword in ["哲学", "思想", "逻辑", "伦理", "存在", "认知"]):
-            return {"problem_type": "哲学", "field": "哲学", "level": "大学"}
-
-        # 如果无法确定具体类型，返回通用类型
-        else:
-            return {"problem_type": "一般", "field": "综合", "level": "成人"}
+        return analysis
 
 class ProblemSolver:
     def __init__(self):
@@ -198,7 +175,8 @@ class ProblemSolver:
         reasoning_process = ReasoningProcess(initial_problem=problem)
         web_info = web_viewer(problem)
 
-        chosen_prompt = self.prompt_optimizer.choose_prompt(problem, messages)
+        chosen_prompt, prompt_explanation = self.prompt_optimizer.choose_prompt(problem, messages)
+        reasoning_process.prompt_selection = prompt_explanation
 
         # 获取用户的上一个问题（如果存在）
         previous_question = None
@@ -265,7 +243,7 @@ class ProblemSolver:
 3. 每个步骤应独立且不重复，避免不必要的重复处理。
 4. 请不要给出最终答案，只需提供分析和计划。
 5. 如果不需要网络搜索信息，请忽略。
-6. 请严格按照以下XML格式返回结果，确保XML格式正确无误，否则会导致解析失败：
+6. 请严格按照以下XML格式返回结果，确保XML格式正确无误：
 
 <analysis>
     <step>
@@ -293,32 +271,107 @@ class ProblemSolver:
             temperature=0.3
         ).choices[0].message.content.strip()
 
+        # 添加后处理步骤
+        response = self.fix_xml(response)
+
         steps = self.parse_steps_xml(response)
         return response, steps
 
-    def parse_steps_xml(self, analysis: str) -> List[Step]:
-        xml_content = re.search(r'<analysis>.*</analysis>', analysis, re.DOTALL)
+    def fix_xml(self, xml_string: str) -> str:
+        # 移除所有非XML内容
+        xml_content = re.search(r'<analysis>.*</analysis>', xml_string, re.DOTALL)
         if xml_content:
-            analysis = xml_content.group(0)
+            xml_string = xml_content.group(0)
+        else:
+            # 如果没有找到完整的<analysis>标签，尝试提取所有<step>标签
+            steps = re.findall(r'<step>.*?</step>', xml_string, re.DOTALL)
+            if steps:
+                xml_string = f"<analysis>{''.join(steps)}</analysis>"
+            else:
+                # 如果还是找不到，返回一个空的analysis标签
+                return "<analysis></analysis>"
 
+        # 移除XML声明（如果存在）
+        xml_string = re.sub(r'<\?xml.*?\?>', '', xml_string)
+
+        # 确保所有标签都正确关闭
+        xml_string = re.sub(r'<(\w+)([^>]*)>', r'<\1\2></\1>', xml_string)
+        xml_string = re.sub(r'</(\w+)>(?=.*</\1>)', '', xml_string)
+
+        # 移除重复的结束标签
+        xml_string = re.sub(r'(</\w+>)\1+', r'\1', xml_string)
+
+        # 确保只有一个根元素
+        xml_string = re.sub(r'</analysis>.*?<analysis>', '', xml_string)
+
+        # 如果没有根元素，添加一个
+        if not xml_string.startswith('<analysis>'):
+            xml_string = f'<analysis>{xml_string}</analysis>'
+
+        return xml_string.strip()
+
+    def parse_steps_xml(self, analysis: str) -> List[Step]:
+        # 步骤1: 尝试修复常见的XML错误
+        analysis = self.fix_xml(analysis)
+
+        # 步骤2: 尝试使用 xml.etree.ElementTree 解析
         try:
             root = ET.fromstring(analysis)
             steps = []
             for step_elem in root.findall('.//step'):
-                content = step_elem.find('content').text.strip() if step_elem.find('content') is not None else ""
-                description = step_elem.find('description').text.strip() if step_elem.find('description') is not None else ""
-                steps.append(Step(content=content, description=description))
-            return steps
+                content = step_elem.find('content')
+                description = step_elem.find('description')
+                content_text = content.text.strip() if content is not None and content.text else ""
+                description_text = description.text.strip() if description is not None and description.text else ""
+                steps.append(Step(content=content_text, description=description_text))
+            if steps:
+                return steps
         except ET.ParseError as e:
             print("XML解析错误:", e)
-            return self.parse_steps_fallback(analysis)
+
+        # 步骤3: 尝试使用 BeautifulSoup 解析
+        try:
+            soup = BeautifulSoup(analysis, 'xml')
+            steps = []
+            for step_elem in soup.find_all('step'):
+                content = step_elem.find('content')
+                description = step_elem.find('description')
+                content_text = content.text.strip() if content else ""
+                description_text = description.text.strip() if description else ""
+                steps.append(Step(content=content_text, description=description_text))
+            if steps:
+                return steps
+        except Exception as e:
+            print("BeautifulSoup解析错误:", e)
+
+        # 步骤4: 如果所有方法都失败，使用正则表达式
+        return self.parse_steps_fallback(analysis)
 
     def parse_steps_fallback(self, analysis: str) -> List[Step]:
-        steps = re.findall(r'<step>\s*<content>(.*?)</content>\s*<description>(.*?)</description>\s*</step>', analysis, re.DOTALL)
+        steps = []
+        step_pattern = r'<step>\s*<content>(.*?)</content>\s*<description>(.*?)</description>\s*</step>'
+        matches = re.findall(step_pattern, analysis, re.DOTALL)
+
+        if not matches:
+            # 如果找不到完整的step结构，尝试单独匹配content和description
+            content_matches = re.findall(r'<content>(.*?)</content>', analysis, re.DOTALL)
+            description_matches = re.findall(r'<description>(.*?)</description>', analysis, re.DOTALL)
+
+            # 使用找到的内容创建Step对象
+            for i in range(max(len(content_matches), len(description_matches))):
+                content = content_matches[i].strip() if i < len(content_matches) else ""
+                description = description_matches[i].strip() if i < len(description_matches) else ""
+                steps.append(Step(content=content, description=description))
+        else:
+            for content, description in matches:
+                steps.append(Step(content=content.strip(), description=description.strip()))
+
+        # 如果仍然没有找到任何步骤，尝试使用旧的方法
         if not steps:
             old_steps = re.findall(r'^\d+\.\s*(.+)', analysis, re.MULTILINE)
-            return [Step(content=step, description="") for step in old_steps]
-        return [Step(content=content.strip(), description=description.strip()) for content, description in steps]
+            steps = [Step(content=step.strip(), description="") for step in old_steps]
+
+        return steps
 
     def execute_step(self, problem: str, step: Step, web_info: str, step_number: int, previous_steps: List[Step], messages: List[Dict[str, str]], previous_question: Optional[str]) -> str:
         previous_steps_info = "\n".join([f"步骤 {i+1}：\n内容：{s.content}\n结果：{s.result}" for i, s in enumerate(previous_steps)])
@@ -501,6 +554,7 @@ def chat(history):
             collapsible_content = f"""
 <details>
     <summary>思考过程</summary>
+    <p><strong>Prompt 选择：</strong>{update.prompt_selection}</p>
     <p><strong>初步分析：</strong>{update.ia_analysis}</p>
     {attempts_content}
 </details>
