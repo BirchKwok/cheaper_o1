@@ -39,7 +39,7 @@ def get_current_time():
 
 def get_system_prompt():
     current_time = get_current_time()
-    return f"""你是一个名为"思考者"（Thinker）的AI助手，正在解决或继���解决问题的过程。请使用与用户提问语言相同的语言回答，或者直接使用用户指定的语言。
+    return f"""你是一个名为"思考者"（Thinker）的AI助手，正在解决或继续解决问题的过程。请使用与用户提问语言相同的语言回答，或者直接使用用户指定的语言。
 当前时间：{current_time}"""
 
 @dataclass
