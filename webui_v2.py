@@ -1,13 +1,11 @@
 import os
 import gradio as gr
 import re
-import xml.etree.ElementTree as ET
 from openai import OpenAI
 from dataclasses import dataclass, field
 from typing import List, Optional, Tuple, Dict
 from datetime import datetime
-from bs4 import BeautifulSoup
-import math  # 导入数学模块
+
 
 # 假设这是您用于获取网络搜索信息的模块
 from webviewer import web_viewer
@@ -64,12 +62,10 @@ class ProblemSolver:
     # 更新计算器函数，支持科学计算
     def calculator(self, tool_input: str) -> str:
         try:
-            # 安全地解析和计算数学表达式
             import ast
             import operator as op
             import math
 
-            # 支持的运算符
             allowed_operators = {
                 ast.Add: op.add,
                 ast.Sub: op.sub,
@@ -81,7 +77,6 @@ class ProblemSolver:
                 ast.USub: op.neg,
             }
 
-            # 允许使用的数学函数
             allowed_functions = {
                 'sin': math.sin,
                 'cos': math.cos,
@@ -90,8 +85,8 @@ class ProblemSolver:
                 'acos': math.acos,
                 'atan': math.atan,
                 'sqrt': math.sqrt,
-                'log': math.log,       # 自然对数
-                'log10': math.log10,   # 以10为底的对数
+                'log': math.log,
+                'log10': math.log10,
                 'exp': math.exp,
                 'pow': math.pow,
                 'fabs': math.fabs,
@@ -100,17 +95,16 @@ class ProblemSolver:
                 'ceil': math.ceil,
                 'degrees': math.degrees,
                 'radians': math.radians,
-                # 如有需要，可以添加更多函数
             }
 
             def eval_expr(node):
-                if isinstance(node, ast.Num):  # <number>
-                    return node.n
-                elif isinstance(node, ast.BinOp):  # <left> <operator> <right>
+                if isinstance(node, ast.Constant):
+                    return node.value
+                elif isinstance(node, ast.BinOp):
                     return allowed_operators[type(node.op)](eval_expr(node.left), eval_expr(node.right))
-                elif isinstance(node, ast.UnaryOp):  # <operator> <operand> e.g., -1
+                elif isinstance(node, ast.UnaryOp):
                     return allowed_operators[type(node.op)](eval_expr(node.operand))
-                elif isinstance(node, ast.Call):  # Function calls
+                elif isinstance(node, ast.Call):
                     func_name = node.func.id
                     if func_name in allowed_functions:
                         args = [eval_expr(arg) for arg in node.args]
@@ -128,18 +122,15 @@ class ProblemSolver:
 
     # 实现搜索引擎工具
     def search_engine(self, tool_input: str) -> str:
-        # 使用 web_viewer 或实际的搜索引擎 API
         result = web_viewer(tool_input)
         return result
 
     # 实现代码解释器工具
     def code_interpreter(self, tool_input: str) -> str:
         try:
-            # 限制执行环境
             exec_globals = {}
             exec_locals = {}
             exec(tool_input, exec_globals, exec_locals)
-            # 获取执行后的变量，作为结果返回
             output = exec_locals.get('output', '代码已执行，但未找到变量 output。')
             return str(output)
         except Exception as e:
@@ -225,13 +216,31 @@ class ProblemSolver:
 之前的尝试：
 {previous_attempts}
 
+当前可用的工具和主要用途：
+**工具列表：**
+
+1. **计算器**：用于执行基本和科学计算，包括加减乘除、幂、对数、三角函数等常见数学运算。适用于**单个数学表达式**的计算。
+
+2. **搜索引擎**：用于获取最新的信息、定义和一般知识。适用于**查询事实**和**获取信息**。
+
+3. **代码解释器**：用于编写和执行代码，适用于无法通过计算器直接计算的**复杂计算**、**数据处理**、**模拟**等。
+
+**工具选择指南：**
+
+- **当需要计算单个数学表达式时，使用计算器。**
+
+- **当需要编写代码解决复杂问题或进行数据处理时，使用代码解释器。**
+
+- **当需要查询知识、定义或事实信息时，使用搜索引擎。**
+
+
 请严格按照以下格式返回你的规划：
 <reason_summary>思考步骤摘要</reason_summary>
 <reason>你的思考步骤</reason>
 
 注意：
 - 不要直接回答问题本身。
-- 请描述你将如何解决问题，先提供摘要，再给出详细的步骤。
+- 请描述你将如何解决问题，先提供摘要，再给出详细的步骤。如果可以使用工具，请规划使用工具的步骤。
 - 使用第一人称，说明你将要做什么。
 - 不要包含判断、反思或总结内容。
 - 请不要添加任何额外的文本或说明。
@@ -326,9 +335,6 @@ class ProblemSolver:
             temperature=0.5  # 调低温度以提高指令遵循性
         ).choices[0].message.content.strip()
 
-        # 打印模型的完整响应
-        print("模型的完整响应：", response)
-
         # 检查并处理工具请求
         while True:
             tool_request_match = re.search(r'<tool>(.*?)</tool>', response, re.DOTALL)
@@ -372,16 +378,12 @@ class ProblemSolver:
 - **请确保评分标签单独占一行。**
                 """
                 # 继续与模型对话
-                    response = glm_step_client.chat.completions.create(
-                        model=glm_step_model,
-                        messages=messages + [{"role": "user", "content": prompt}],
-                        temperature=0.5
-                    ).choices[0].message.content.strip()
-                    # 打印模型的完整响应
-                    print("模型的完整响应（工具执行后）：", response)
-                else:
-                    # 工具请求格式不正确，跳出循环
-                    break
+                response = glm_step_client.chat.completions.create(
+                    model=glm_step_model,
+                    messages=messages + [{"role": "user", "content": prompt}],
+                    temperature=0.5
+                ).choices[0].message.content.strip()
+                continue  # 继续处理下一个工具请求
             else:
                 break
 
@@ -411,12 +413,13 @@ class ProblemSolver:
 
 网络搜索信息：{web_info}
         """
-        response = glm_client.chat.completions.create(
-            model=glm_model,
+        response = glm_step_client.chat.completions.create(
+            model=glm_step_model,
             messages=messages + [{"role": "user", "content": prompt}],
             temperature=0.7
         ).choices[0].message.content.strip()
         return response
+
 
 solver = ProblemSolver()
 
