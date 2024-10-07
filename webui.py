@@ -35,7 +35,7 @@ deepseek_client = OpenAI(
     base_url="https://api.deepseek.com/v1"
 )
 deepseek_model = "deepseek-chat"
-
+deepseek_step_model = "deepseek-chat"
 
 
 def get_current_time():
@@ -233,7 +233,8 @@ class ProblemSolver:
         is_computer_related = self.is_computer_related(problem)
         client = deepseek_client if is_computer_related else glm_client
         model = deepseek_model if is_computer_related else glm_model
-        step_model = deepseek_model if is_computer_related else glm_step_model
+        step_model = deepseek_step_model # if is_computer_related else glm_step_model
+        step_client = deepseek_client # if is_computer_related else glm_client
 
         for attempt_number in range(1, max_attempts + 1):
             steps = [Step(content=step.content, description=step.description) for step in initial_steps]
@@ -241,7 +242,7 @@ class ProblemSolver:
 
             for i, step in enumerate(steps):
                 yield f"正在进行第 {attempt_number} 次尝试 (步骤 {i+1}/{len(steps)})"
-                step.result = self.execute_step(problem, step, web_info, i+1, steps[:i], messages, previous_question, client, step_model)
+                step.result = self.execute_step(problem, step, web_info, i+1, steps[:i], messages, previous_question, step_client, step_model)
 
             yield f"第 {attempt_number} 次尝试完成，正在总结结果"
             final_reasoning = self.summarize_results(problem, steps, client, model)
@@ -316,6 +317,7 @@ class ProblemSolver:
 5. 质疑和验证之前步骤的正确性。如果发现任何错误或不一致，请指出并解释。
 6. 如果需要，对之前的步骤进行修正。
 7. 结合以上信息，详细完成当前步骤，并给出相应的结果。
+8. 不要尝试在当前步骤中直接解答问题，只需要根据指导和之前步骤的结果，完成当前步骤。
 
 请以下面的格式提供你的回答：
 
@@ -341,7 +343,36 @@ class ProblemSolver:
             messages=step_messages,
             temperature=0.7
         ).choices[0].message.content.strip()
-        return response
+
+        # 添加反思步骤
+        reflection_prompt = f"""
+请对以下步骤的结果进行反思：
+
+步骤内容：{step.content}
+
+步骤结果：{response}
+
+请回答以下问题：
+1. 这个结果是否合理？为什么？
+2. 这个结果是否有改进的空间？如果有，如何改进？
+3. 这个结果是否有任何潜在的问题或错误？如果有，是什么？
+
+请以下面的格式提供你的回答：
+
+反思：
+[在这里提供你的反思]
+        """
+        reflection_messages = messages + [{"role": "user", "content": reflection_prompt}]
+
+        reflection_response = client.chat.completions.create(
+            model=model,
+            messages=reflection_messages,
+            temperature=0.7
+        ).choices[0].message.content.strip()
+
+        # 将反思结果添加到步骤内容中
+        step.result = f"{response}\n\n反思：\n{reflection_response}"
+        return step.result
 
     def summarize_results(self, problem: str, steps: List[Step], client, model) -> str:
         combined_results = "\n".join([f"步骤 {i+1} 结果：{step.result}" for i, step in enumerate(steps)])
@@ -396,6 +427,8 @@ class ProblemSolver:
 3. 推理过程是否合理，步骤是否清晰？
 4. 最终结论是否有充分的依据支持？
 5. 是否有任何明显的错误或遗漏？
+6. 是否充分利用了网络搜索信息？或者说网络搜索信息中已经有答案了，但是解决方案没有利用？
+7. 每个步骤都包含了对前一个步骤的质疑和验证，所以越往后的步骤越重要，请仔细判断。
 
 如果认为答案已经正确且完整，请明确说明"结果正确"，并简要总结正确的答案。
 如果认为还需要进一步迭代，请详细说明原因和改进建议。
